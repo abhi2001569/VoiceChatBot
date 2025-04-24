@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Voice Enabled ChatBot</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.3.1/css/bootstrap.min.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    body {
+      background: linear-gradient(to right, #74ebd5, #acb6e5);
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    h2 { color: #fff; font-weight: bold; }
+    #chat-container {
+      max-width: 600px; margin: 0 auto; border-radius: 16px;
+      overflow: hidden; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+      background: #ffffff;
+    }
+    #chat-messages {
+      height: 500px; overflow-y: auto; padding: 20px; background: #f0f4f8;
+    }
+    .message {
+      margin-bottom: 15px; padding: 12px 18px;
+      border-radius: 20px; max-width: 75%; word-wrap: break-word;
+    }
+    .user-message {
+      background: #4e73df; color: #fff; margin-left: auto;
+      border-bottom-right-radius: 6px;
+    }
+    .bot-message {
+      background: #e2eafc; margin-right: auto;
+      border-bottom-left-radius: 6px;
+    }
+    #input-area {
+      display: flex; padding: 15px; background: #fff;
+      border-top: 1px solid #ccc;
+    }
+    #userInput {
+      flex-grow: 1; border-radius: 30px; padding: 12px 18px;
+      border: 1px solid #ccc; font-size: 16px;
+    }
+    #micButton {
+      background: none; border: none; cursor: pointer;
+      margin-left: 12px; font-size: 26px; color: #4e73df;
+    }
+    #micButton.listening {
+      color: #dc3545; animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.2); }
+      100% { transform: scale(1); }
+    }
+    .typing-indicator {
+      display: inline-block; padding: 10px 15px; background: #dee2e6;
+      border-radius: 20px; border-bottom-left-radius: 5px; margin-right: auto;
+    }
+    .typing-dot {
+      display: inline-block; width: 8px; height: 8px;
+      border-radius: 50%; background: #555; margin: 0 2px;
+      animation: typingAnimation 1.4s infinite ease-in-out;
+    }
+    .typing-dot:nth-child(1) { animation-delay: 0s; }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typingAnimation {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-5px); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container mt-4">
+    <h2 class="text-center mb-4">Voice Enabled ChatBot</h2>
+    <div id="chat-container">
+      <div id="chat-messages"></div>
+      <div id="input-area">
+        <input type="text" id="userInput" placeholder="Type or click mic to speak" onkeypress="handleKeyPress(event)" />
+        <button id="micButton" onclick="toggleRecording()">🎤</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const chatMessages = document.getElementById('chat-messages');
+    const userInput = document.getElementById('userInput');
+    const micButton = document.getElementById('micButton');
+
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
+
+    async function toggleRecording() {
+      if (isRecording) {
+        stopRecording();
+      } else {
+        startRecording();
+      }
+    }
+
+    async function startRecording() {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+
+      mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+      mediaRecorder.onstop = async () => {
+        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+        const base64Audio = await convertToBase64(blob);
+        micButton.classList.remove('listening');
+        isRecording = false;
+
+        addMessage('system', 'Transcribing...');
+        const transcript = await transcribeAudio(base64Audio);
+        userInput.value = transcript;
+        sendMessage();
+      };
+
+      micButton.classList.add('listening');
+      mediaRecorder.start();
+      isRecording = true;
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+      }
+    }
+
+    function convertToBase64(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    async function transcribeAudio(base64Audio) {
+      try {
+        const response = await fetch('https://speech.googleapis.com/v1/speech:recognize?key=AIzaSyA9xR6RHL9nxubDy3AMFalDaAKfJu6VZAQ', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            config: {
+            encoding: 'LINEAR16',  // Change this to LINEAR16
+            sampleRateHertz: 16000, // Ensure this matches your audio recording rate
+            languageCode: 'en-US'
+            },
+            audio: {
+            content: base64Audio,
+            },
+        }),
+        });
+
+
+        const data = await response.json();
+        return data.results?.[0]?.alternatives?.[0]?.transcript || '';
+      } catch (error) {
+        console.error('Google STT error:', error);
+        return 'Speech recognition failed.';
+      }
+    }
+
+    function handleKeyPress(event) {
+      if (event.key === 'Enter') {
+        sendMessage();
+      }
+    }
+
+    function addMessage(sender, text, isMarkdown = true) {
+      const div = document.createElement('div');
+      div.classList.add('message', sender === 'user' ? 'user-message' : 'bot-message');
+      div.innerHTML = sender === 'bot' && isMarkdown ? marked.parse(text) : text;
+      chatMessages.appendChild(div);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function showTypingIndicator() {
+      const typingDiv = document.createElement('div');
+      typingDiv.id = 'typing-indicator';
+      typingDiv.className = 'typing-indicator';
+      typingDiv.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+      chatMessages.appendChild(typingDiv);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function hideTypingIndicator() {
+      const typing = document.getElementById('typing-indicator');
+      if (typing) typing.remove();
+    }
+
+    async function sendMessage() {
+      const input = userInput.value.trim();
+      if (!input) return;
+
+      addMessage('user', input, false);
+      userInput.value = '';
+      showTypingIndicator();
+
+      try {
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer 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',
+            'HTTP-Referer': 'http://localhost',
+            'X-Title': 'Voice ChatBot Test'
+          },
+          body: JSON.stringify({
+            model: 'deepseek/deepseek-r1:free',
+            messages: [{ role: 'user', content: input }]
+          })
+        });
+
+        const raw = await response.text();
+        console.log('OpenRouter raw:', raw);
+
+        const data = JSON.parse(raw);
+        const botReply = data.choices?.[0]?.message?.content || 'No response.';
+        hideTypingIndicator();
+        addMessage('bot', botReply);
+      } catch (error) {
+        console.error('OpenRouter error:', error);
+        hideTypingIndicator();
+        addMessage('bot', 'Error: ' + error.message, false);
+      }
+    }
+  </script>
+</body>
+</html>
